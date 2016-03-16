@@ -12,7 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/satori/go.uuid"
 )
 
 type ebsVolumeDriver struct {
@@ -21,13 +20,10 @@ type ebsVolumeDriver struct {
 	awsInstanceId       string
 	awsRegion           string
 	awsAvailabilityZone string
-	volumes             map[string]string
 }
 
 func NewEbsVolumeDriver() (VolumeDriver, error) {
-	d := &ebsVolumeDriver{
-		volumes: make(map[string]string),
-	}
+	d := &ebsVolumeDriver{}
 
 	ec2sess := session.New()
 	d.ec2meta = ec2metadata.New(ec2sess)
@@ -59,84 +55,36 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 }
 
 func (d *ebsVolumeDriver) Create(name string) error {
-	m, exists := d.volumes[name]
-	if exists {
-		// Docker won't always cleanly remove entries.  It's okay so long
-		// as the target isn't already mounted by someone else.
-		if m != "" {
-			return errors.New("Name already in use.")
-		}
-	}
-
-	d.volumes[name] = ""
 	return nil
 }
 
 func (d *ebsVolumeDriver) Mount(name string) (string, error) {
-	m, exists := d.volumes[name]
-	if !exists {
-		return "", errors.New("Name not found.")
-	}
-
-	if m != "" {
-		return "", errors.New("Volume already mounted.")
-	}
-
 	return d.doMount(name)
 }
 
 func (d *ebsVolumeDriver) Path(name string) (string, error) {
-	m, exists := d.volumes[name]
-	if !exists {
-		return "", errors.New("Name not found.")
-	}
-
-	if m == "" {
-		return "", errors.New("Volume not mounted.")
-	}
-
-	return m, nil
+	return "/mnt/blocker/" + name, nil
 }
 
 func (d *ebsVolumeDriver) Remove(name string) error {
-	m, exists := d.volumes[name]
-	if !exists {
-		return errors.New("Name not found.")
+	err := d.doUnmount(name)
+	if err != nil {
+		return err
 	}
-
-	// If the volume is still mounted, unmount it before removing it.
-	if m != "" {
-		err := d.doUnmount(name)
-		if err != nil {
-			return err
-		}
-	}
-
-	delete(d.volumes, name)
 	return nil
 }
 
 func (d *ebsVolumeDriver) Unmount(name string) error {
-	m, exists := d.volumes[name]
-	if !exists {
-		return errors.New("Name not found.")
+	err := d.doUnmount(name)
+	if err != nil {
+		return err
 	}
-
-	// If the volume is mounted, go ahead and unmount it.  Ignore requests
-	// to unmount volumes that aren't actually mounted.
-	if m != "" {
-		err := d.doUnmount(name)
-		if err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
 func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 	// Auto-generate a random mountpoint.
-	mnt := "/mnt/blocker/" + uuid.NewV4().String()
+	mnt := "/mnt/blocker/" + name
 
 	// Ensure the directory /mnt/blocker/<m> exists.
 	if err := os.MkdirAll(mnt, os.ModeDir|0700); err != nil {
@@ -163,7 +111,6 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 	}
 
 	// And finally set and return it.
-	d.volumes[name] = mnt
 	return mnt, nil
 }
 
@@ -295,7 +242,7 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 }
 
 func (d *ebsVolumeDriver) doUnmount(name string) error {
-	mnt := d.volumes[name]
+	mnt := "/mnt/blocker/" + name
 
 	// First unmount the device.
 	if out, err := exec.Command("umount", mnt).CombinedOutput(); err != nil {
@@ -313,7 +260,6 @@ func (d *ebsVolumeDriver) doUnmount(name string) error {
 	}
 
 	// Finally clear out the slot and return.
-	d.volumes[name] = ""
 	return nil
 }
 
