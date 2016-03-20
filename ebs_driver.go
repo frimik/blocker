@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -94,6 +95,10 @@ func (d *ebsVolumeDriver) doMount(name string) (string, error) {
 		return "", fmt.Errorf("Mountpoint %v is not a directory: %v", mnt, err)
 	}
 
+	if err := exec.Command("mountpoint", "-q", mnt).Run(); err == nil {
+		return mnt, nil
+	}
+
 	// Attach the EBS device to the current EC2 instance.
 	dev, err := d.attachVolume(name)
 	if err != nil {
@@ -179,10 +184,34 @@ func (d *ebsVolumeDriver) waitUntilAvailable(name string) error {
 }
 
 func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
+	// Check if the volume is already attached to instance
+	info, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
+		VolumeIds: []*string{aws.String(name)},
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(info.Volumes[0].Attachments) == 1 {
+		if *info.Volumes[0].Attachments[0].State == ec2.VolumeAttachmentStateAttached &&
+			*info.Volumes[0].Attachments[0].InstanceId == d.awsInstanceId {
+			re := regexp.MustCompile("/dev/(xv|s)d([f-p])")
+			res := re.FindStringSubmatch(*info.Volumes[0].Attachments[0].Device)
+			if len(res) != 3 {
+				return "", errors.New("Unable to find mount device for " + name)
+			}
+			if _, err := os.Lstat("/dev/sd" + res[2]); err == nil {
+				return "/dev/sd" + res[2], nil
+			}
+			if _, err := os.Lstat("/dev/xvd" + res[2]); err == nil {
+				return "/dev/xvd" + res[2], nil
+			}
+		}
+	}
+
 	// Since detaching is asynchronous, we want to check first to see if the
 	// target volume is in the process of being detached.  If it is, we'll wait
 	// a little bit until it's ready to use.
-	err := d.waitUntilAvailable(name)
+	err = d.waitUntilAvailable(name)
 	if err != nil {
 		return "", err
 	}
