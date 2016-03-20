@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -55,32 +56,52 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 	return d, nil
 }
 
-func (d *ebsVolumeDriver) Create(name string) error {
+func (d *ebsVolumeDriver) Create(path string) error {
 	return nil
 }
 
-func (d *ebsVolumeDriver) Mount(name string) (string, error) {
-	return d.doMount(name)
+func (d *ebsVolumeDriver) Mount(path string) (string, error) {
+	volume, folder := parsePath(path)
+	mnt, err := d.doMount(volume)
+	if err != nil {
+		return "", err
+	}
+	return mnt + folder, nil
 }
 
-func (d *ebsVolumeDriver) Path(name string) (string, error) {
-	return "/mnt/blocker/" + name, nil
+func (d *ebsVolumeDriver) Path(path string) (string, error) {
+	volume, folder := parsePath(path)
+	mnt := fmt.Sprintf("/mnt/blocker/%s%s", volume, folder)
+	if stat, err := os.Stat(mnt); err != nil || !stat.IsDir() {
+		return "", errors.New("Volume not mounted.")
+	}
+	return mnt, nil
 }
 
-func (d *ebsVolumeDriver) Remove(name string) error {
-	err := d.doUnmount(name)
+func (d *ebsVolumeDriver) Remove(path string) error {
+	volume, _ := parsePath(path)
+	err := d.doUnmount(volume)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (d *ebsVolumeDriver) Unmount(name string) error {
-	err := d.doUnmount(name)
+func (d *ebsVolumeDriver) Unmount(path string) error {
+	volume, _ := parsePath(path)
+	err := d.doUnmount(volume)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func parsePath(path string) (string, string) {
+	sep := strings.Index(path, "/")
+	if sep < 0 {
+		return path, ""
+	}
+	return path[:sep], path[sep:]
 }
 
 func (d *ebsVolumeDriver) doMount(name string) (string, error) {
