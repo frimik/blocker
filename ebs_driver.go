@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"strconv"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -56,7 +57,59 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 	return d, nil
 }
 
-func (d *ebsVolumeDriver) Create(path string) error {
+func (d *ebsVolumeDriver) Create(name string, options map[string]string) error {
+	//TODO all lookups should be by name
+	/*
+	var iops int64
+	i, ok := options["iops"]
+	if ok {
+		iops, _ := strconv.ParseInt(i, 10, 64)
+	}
+	*/
+	size, _ := strconv.ParseInt(options["size"], 10, 64)
+	volume, err := d.ec2.CreateVolume(&ec2.CreateVolumeInput{
+		AvailabilityZone: &d.awsAvailabilityZone,
+		Size:             &size,
+		//TODO support more options:
+		/*
+		SnapshotId:       options["snapshot-id"],
+		VolumeType:       options["volume-type"],
+		Iops:             &iops,
+		KmsKeyId:         options["kms-key-id"],
+		*/
+	})
+	if err != nil {
+		return err
+	}
+	var volumeId = *volume.VolumeId
+
+	var tagName = "Name"
+	var tag = ec2.Tag{
+		Key:   &tagName,
+		Value: &name,
+	}
+	var tags = make([]*ec2.Tag, 1)
+	tags[0] = &tag
+	d.ec2.CreateTags(&ec2.CreateTagsInput{
+		Resources: []*string{aws.String(volumeId)},
+		Tags:      tags,
+	})
+
+	//format volume
+	device, err := d.attachVolume(volumeId)
+	if err != nil {
+		return err
+	}
+	//sudo?
+	if out, err := exec.Command("mkfs", "-t", "etx4", device).CombinedOutput(); err != nil {
+		// Make sure to detach the instance before quitting (ignoring errors).
+		d.detachVolume(volumeId)
+
+		return fmt.Errorf("Formatting device %v failed: %v\n%v",
+			device, err, string(out))
+	}
+
+	d.detachVolume(volumeId)
 	return nil
 }
 

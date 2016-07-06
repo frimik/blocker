@@ -62,7 +62,7 @@ func makeRoutes(d VolumeDriver) http.Handler {
 	r := mux.NewRouter()
 	// TODO: permit options in the name string.
 	r.HandleFunc("/Plugin.Activate", servePluginActivate)
-	r.HandleFunc("/VolumeDriver.Create", serveVolumeSimple(d.Create))
+	r.HandleFunc("/VolumeDriver.Create", serveVolumeCreate(d.Create))
 	r.HandleFunc("/VolumeDriver.Mount", serveVolumeComplex(d.Mount))
 	r.HandleFunc("/VolumeDriver.Path", serveVolumeComplex(d.Path))
 	r.HandleFunc("/VolumeDriver.Remove", serveVolumeSimple(d.Remove))
@@ -99,6 +99,30 @@ func serveVolumeSimple(f func(string) error) http.HandlerFunc {
 		err := json.NewDecoder(r.Body).Decode(&vol)
 		if err == nil {
 			err = f(vol.Name)
+			log("\tdone: (%s): %v\n", vol.Name, err)
+		}
+		var errs string
+		if err != nil {
+			errs = err.Error()
+		}
+		json.NewEncoder(w).Encode(volumeSimpleResponse{
+			Err: errs,
+		})
+	}
+}
+
+type volumeCreateRequest struct {
+	Name string
+	Opts map[string]string
+}
+
+func serveVolumeCreate(f func(string, map[string]string) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log("* %s\n", r.URL.String())
+		var vol volumeCreateRequest
+		err := json.NewDecoder(r.Body).Decode(&vol)
+		if err == nil {
+			err = f(vol.Name, vol.Opts)
 			log("\tdone: (%s): %v\n", vol.Name, err)
 		}
 		var errs string
