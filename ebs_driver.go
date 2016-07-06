@@ -97,6 +97,18 @@ func (d *ebsVolumeDriver) Unmount(path string) error {
 }
 
 func (d *ebsVolumeDriver) Get(name string) (map[string]string, error) {
+	volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
+		VolumeIds: []*string{aws.String(name)},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Check to see if the volume exists
+	if len(volumes.Volumes) == 0 {
+		return nil, errors.New("Volume not found")
+	}
+
 	var volume = make(map[string]string)
 	volume["Name"] = name
 	mount_path, err := d.Path(name)
@@ -109,14 +121,15 @@ func (d *ebsVolumeDriver) Get(name string) (map[string]string, error) {
 func (d *ebsVolumeDriver) List() ([]map[string]string, error) {
 	info, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{})
 	if err != nil {
-		return make([]map[string]string, 0), err
+		return nil, err
 	}
 	var volumes = make([]map[string]string, len(info.Volumes))
 	for index := 0; index < len(info.Volumes); index++ {
 		var name = *(info.Volumes[index].VolumeId)
+		volumes[index] = make(map[string]string)
 		volumes[index]["Name"] = name
-		mount_path, err := d.Path(name)
-		if err != nil {
+		mount_path, path_err := d.Path(name)
+		if path_err != nil {
 			volumes[index]["Mountpoint"] = mount_path
 		}
 	}
