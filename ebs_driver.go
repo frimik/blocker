@@ -58,7 +58,6 @@ func NewEbsVolumeDriver() (VolumeDriver, error) {
 }
 
 func (d *ebsVolumeDriver) Create(name string, options map[string]string) error {
-	//TODO all lookups should be by name
 	/*
 	var iops int64
 	i, ok := options["iops"]
@@ -68,8 +67,8 @@ func (d *ebsVolumeDriver) Create(name string, options map[string]string) error {
 	*/
 	size, _ := strconv.ParseInt(options["size"], 10, 64)
 	volume, err := d.ec2.CreateVolume(&ec2.CreateVolumeInput{
-		AvailabilityZone: &d.awsAvailabilityZone,
-		Size:             &size,
+		AvailabilityZone: aws.String(d.awsAvailabilityZone),
+		Size:             aws.Int64(size),
 		//TODO support more options:
 		/*
 		SnapshotId:       options["snapshot-id"],
@@ -83,16 +82,14 @@ func (d *ebsVolumeDriver) Create(name string, options map[string]string) error {
 	}
 	var volumeId = *volume.VolumeId
 
-	var tagName = "Name"
-	var tag = ec2.Tag{
-		Key:   &tagName,
-		Value: &name,
-	}
-	var tags = make([]*ec2.Tag, 1)
-	tags[0] = &tag
 	d.ec2.CreateTags(&ec2.CreateTagsInput{
 		Resources: []*string{aws.String(volumeId)},
-		Tags:      tags,
+		Tags:      []*ec2.Tag{
+			&ec2.Tag{
+				Key:   aws.String("Name"),
+				Value: aws.String(name),
+			},
+		},
 	})
 
 	//format volume
@@ -150,20 +147,19 @@ func (d *ebsVolumeDriver) Unmount(path string) error {
 }
 
 func (d *ebsVolumeDriver) Get(name string) (map[string]string, error) {
-	volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
-		VolumeIds: []*string{aws.String(name)},
-	})
+	ebs_volume, err := d.getEBSVolume(name)
+
 	if err != nil {
 		return nil, err
 	}
 
-	// Check to see if the volume exists
-	if len(volumes.Volumes) == 0 {
+	if ebs_volume == nil {
 		return nil, errors.New("Volume not found")
 	}
 
 	var volume = make(map[string]string)
 	volume["Name"] = name
+	volume["AwsVolumeId"] = *ebs_volume.VolumeId
 	mount_path, err := d.Path(name)
 	if err != nil {
 		volume["Mountpoint"] = mount_path
@@ -172,15 +168,26 @@ func (d *ebsVolumeDriver) Get(name string) (map[string]string, error) {
 }
 
 func (d *ebsVolumeDriver) List() ([]map[string]string, error) {
-	info, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{})
+	info, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
+		Filters: []*ec2.Filter{
+			&ec2.Filter{
+				Name: aws.String("tag-key"),
+				Values: []*string{aws.String("Name")},
+			},
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
+
 	var volumes = make([]map[string]string, len(info.Volumes))
 	for index := 0; index < len(info.Volumes); index++ {
-		var name = *(info.Volumes[index].VolumeId)
+		var VolumeId = *(info.Volumes[index].VolumeId)
+		//TODO filter please
+		var name = *(info.Volumes[index].Tags[0].Value)
 		volumes[index] = make(map[string]string)
 		volumes[index]["Name"] = name
+		volumes[index]["AwsVolumeId"] = VolumeId
 		mount_path, path_err := d.Path(name)
 		if path_err != nil {
 			volumes[index]["Mountpoint"] = mount_path
@@ -193,6 +200,21 @@ func (d *ebsVolumeDriver) Capabilities() map[string]string {
 	var capabilties = make(map[string]string)
 	capabilties["Scope"] = "global"
 	return capabilties
+}
+
+func (d *ebsVolumeDriver) getEBSVolume(name string) (*ec2.Volume, error) {
+	volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
+		Filters: []*ec2.Filter{
+			&ec2.Filter{
+				Name: aws.String("tag:Name"),
+				Values: []*string{aws.String(name)},
+			},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return volumes.Volumes[0], nil
 }
 
 func parsePath(path string) (string, string) {
@@ -248,15 +270,13 @@ func (d *ebsVolumeDriver) waitUntilState(
 	for {
 		tries++
 
-		volumes, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
-			VolumeIds: []*string{aws.String(name)},
-		})
+		volume, err := d.getEBSVolume(name)
 		if err != nil {
 			return err
 		}
 
 		// Check to see if the volume reached the intended state; if yes, return.
-		err = check(volumes.Volumes[0])
+		err = check(volume)
 		if err == nil {
 			return nil
 		}
@@ -305,17 +325,15 @@ func (d *ebsVolumeDriver) waitUntilAvailable(name string) error {
 
 func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 	// Check if the volume is already attached to instance
-	info, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{
-		VolumeIds: []*string{aws.String(name)},
-	})
+	volume, err := d.getEBSVolume(name)
 	if err != nil {
 		return "", err
 	}
-	if len(info.Volumes[0].Attachments) == 1 {
-		if *info.Volumes[0].Attachments[0].State == ec2.VolumeAttachmentStateAttached &&
-			*info.Volumes[0].Attachments[0].InstanceId == d.awsInstanceId {
+	if len(volume.Attachments) == 1 {
+		if *volume.Attachments[0].State == ec2.VolumeAttachmentStateAttached &&
+			*volume.Attachments[0].InstanceId == d.awsInstanceId {
 			re := regexp.MustCompile("/dev/(xv|s)d([f-p])")
-			res := re.FindStringSubmatch(*info.Volumes[0].Attachments[0].Device)
+			res := re.FindStringSubmatch(*volume.Attachments[0].Device)
 			if len(res) != 3 {
 				return "", errors.New("Unable to find mount device for " + name)
 			}
@@ -353,7 +371,7 @@ func (d *ebsVolumeDriver) attachVolume(name string) (string, error) {
 		if _, err := d.ec2.AttachVolume(&ec2.AttachVolumeInput{
 			Device:     aws.String(dev),
 			InstanceId: aws.String(d.awsInstanceId),
-			VolumeId:   aws.String(name),
+			VolumeId:   volume.VolumeId,
 		}); err != nil {
 			if awsErr, ok := err.(awserr.Error); ok &&
 				awsErr.Code() == "InvalidParameterValue" {
@@ -413,9 +431,13 @@ func (d *ebsVolumeDriver) doUnmount(name string) error {
 }
 
 func (d *ebsVolumeDriver) detachVolume(name string) error {
+	volume, err := d.getEBSVolume(name)
+	if err != nil {
+		return err
+	}
 	if _, err := d.ec2.DetachVolume(&ec2.DetachVolumeInput{
 		InstanceId: aws.String(d.awsInstanceId),
-		VolumeId:   aws.String(name),
+		VolumeId:   volume.VolumeId,
 	}); err != nil {
 		return err
 	}
