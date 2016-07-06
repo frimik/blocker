@@ -153,10 +153,6 @@ func (d *ebsVolumeDriver) Get(name string) (map[string]string, error) {
 		return nil, err
 	}
 
-	if ebs_volume == nil {
-		return nil, errors.New("Volume not found")
-	}
-
 	var volume = make(map[string]string)
 	volume["Name"] = name
 	volume["AwsVolumeId"] = *ebs_volume.VolumeId
@@ -213,6 +209,9 @@ func (d *ebsVolumeDriver) getEBSVolume(name string) (*ec2.Volume, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(volumes.Volumes) == 0 {
+		return nil, errors.New("Volume not found")
 	}
 	return volumes.Volumes[0], nil
 }
