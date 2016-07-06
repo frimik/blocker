@@ -97,11 +97,30 @@ func (d *ebsVolumeDriver) Unmount(path string) error {
 }
 
 func (d *ebsVolumeDriver) Get(name string) (map[string]string, error) {
-	return make(map[string]string), nil
+	var volume = make(map[string]string)
+	volume["Name"] = name
+	mount_path, err := d.Path(name)
+	if err != nil {
+		volume["Mountpoint"] = mount_path
+	}
+	return volume, nil
 }
 
 func (d *ebsVolumeDriver) List() ([]map[string]string, error) {
-	return make([]map[string]string, 0), nil
+	info, err := d.ec2.DescribeVolumes(&ec2.DescribeVolumesInput{})
+	if err != nil {
+		return make([]map[string]string, 0), err
+	}
+	var volumes = make([]map[string]string, len(info.Volumes))
+	for index := 0; index < len(info.Volumes); index++ {
+		var name = *(info.Volumes[index].VolumeId)
+		volumes[index]["Name"] = name
+		mount_path, err := d.Path(name)
+		if err != nil {
+			volumes[index]["Mountpoint"] = mount_path
+		}
+	}
+	return volumes, nil
 }
 
 func (d *ebsVolumeDriver) Capabilities() map[string]string {
