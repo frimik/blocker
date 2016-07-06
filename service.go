@@ -67,6 +67,10 @@ func makeRoutes(d VolumeDriver) http.Handler {
 	r.HandleFunc("/VolumeDriver.Path", serveVolumeComplex(d.Path))
 	r.HandleFunc("/VolumeDriver.Remove", serveVolumeSimple(d.Remove))
 	r.HandleFunc("/VolumeDriver.Unmount", serveVolumeSimple(d.Unmount))
+
+	r.HandleFunc("/VolumeDriver.Get", serveVolumeInstance(d.Get))
+	r.HandleFunc("/VolumeDriver.List", serveVolumeList(d.List))
+	r.HandleFunc("/VolumeDriver.Capabilities", serveDriverCapabilities(d.Capabilities))
 	return r
 }
 
@@ -129,6 +133,71 @@ func serveVolumeComplex(f func(string) (string, error)) http.HandlerFunc {
 		json.NewEncoder(w).Encode(volumeComplexResponse{
 			Mountpoint: mountpoint,
 			Err:        errs,
+		})
+	}
+}
+
+type volumeInstanceResponse struct {
+	Volume     map[string]string
+	Err        string
+}
+
+func serveVolumeInstance(f func(string) (map[string]string, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log("* %s\n", r.URL.String())
+		var vol volumeRequest
+		err := json.NewDecoder(r.Body).Decode(&vol)
+		var volume_info = make(map[string]string)
+		if err == nil {
+			volume_info, err = f(vol.Name)
+			log("\tdone: (%s): (%s, %v)\n", vol.Name, volume_info, err)
+		}
+		var errs string
+		if err != nil {
+			errs = err.Error()
+		}
+		json.NewEncoder(w).Encode(volumeInstanceResponse{
+			Volume:     volume_info,
+			Err:        errs,
+		})
+	}
+}
+
+type volumeListResponse struct {
+	Volumes    []map[string]string
+	Err        string
+}
+
+func serveVolumeList(f func() ([]map[string]string, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log("* %s\n", r.URL.String())
+		var volumes []map[string]string
+		var err error
+		volumes, err = f()
+		log("\tdone: (%s, %v)\n", volumes, err)
+		var errs string
+		if err != nil {
+			errs = err.Error()
+		}
+		json.NewEncoder(w).Encode(volumeListResponse{
+			Volumes:    volumes,
+			Err:        errs,
+		})
+	}
+}
+
+type driverCapabilitiesResponse struct {
+	Capabilities    map[string]string
+}
+
+func serveDriverCapabilities(f func() map[string]string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log("* %s\n", r.URL.String())
+		var capabilties map[string]string
+		capabilties = f()
+		log("\tdone: (%s)\n", capabilties)
+		json.NewEncoder(w).Encode(driverCapabilitiesResponse{
+			Capabilities:    capabilties,
 		})
 	}
 }

@@ -20,4 +20,10 @@ type VolumeDriver interface {
 
 	// Unmounts an existing volume.
 	Unmount(name string) error
+
+	Get(name string) (map[string]string, error)
+
+	List() ([]map[string]string, error)
+
+	Capabilities() (map[string]string)
 }

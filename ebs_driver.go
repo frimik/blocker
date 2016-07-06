@@ -96,6 +96,20 @@ func (d *ebsVolumeDriver) Unmount(path string) error {
 	return nil
 }
 
+func (d *ebsVolumeDriver) Get(name string) (map[string]string, error) {
+	return make(map[string]string), nil
+}
+
+func (d *ebsVolumeDriver) List() ([]map[string]string, error) {
+	return make([]map[string]string, 0), nil
+}
+
+func (d *ebsVolumeDriver) Capabilities() map[string]string {
+	var capabilties = make(map[string]string)
+	capabilties["Scope"] = "global"
+	return capabilties
+}
+
 func parsePath(path string) (string, string) {
 	sep := strings.Index(path, "/")
 	if sep < 0 {
