@@ -93,20 +93,20 @@ func (d *ebsVolumeDriver) Create(name string, options map[string]string) error {
 	})
 
 	//format volume
-	device, err := d.attachVolume(volumeId)
+	device, err := d.attachVolume(name)
 	if err != nil {
 		return err
 	}
 	//sudo?
-	if out, err := exec.Command("mkfs", "-t", "etx4", device).CombinedOutput(); err != nil {
+	if out, err := exec.Command("mkfs", "-t", "ext4", device).CombinedOutput(); err != nil {
 		// Make sure to detach the instance before quitting (ignoring errors).
-		d.detachVolume(volumeId)
+		d.detachVolume(name)
 
 		return fmt.Errorf("Formatting device %v failed: %v\n%v",
 			device, err, string(out))
 	}
 
-	d.detachVolume(volumeId)
+	d.detachVolume(name)
 	return nil
 }
 
