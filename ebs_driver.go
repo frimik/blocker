@@ -311,6 +311,16 @@ func (d *ebsVolumeDriver) waitUntilAttached(name string) error {
 	})
 }
 
+func (d *ebsVolumeDriver) waitUntilDettached(name string) error {
+	return d.waitUntilState(name, func(volume *ec2.Volume) error {
+		if len(volume.Attachments) == 0 {
+			return nil
+		}
+		return fmt.Errorf(
+			"Volume state transition failed: still has attachments")
+	})
+}
+
 func (d *ebsVolumeDriver) waitUntilAvailable(name string) error {
 	return d.waitUntilState(name, func(volume *ec2.Volume) error {
 		if *volume.State == ec2.VolumeStateAvailable {
@@ -438,6 +448,11 @@ func (d *ebsVolumeDriver) detachVolume(name string) error {
 		InstanceId: aws.String(d.awsInstanceId),
 		VolumeId:   volume.VolumeId,
 	}); err != nil {
+		return err
+	}
+
+	err = d.waitUntilDettached(name)
+	if err != nil {
 		return err
 	}
 
