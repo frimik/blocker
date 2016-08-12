@@ -65,6 +65,13 @@ func (d *ebsVolumeDriver) Create(name string, options map[string]string) error {
 		iops, _ := strconv.ParseInt(i, 10, 64)
 	}
 	*/
+	ebs_volume, err := d.getEBSVolume(name)
+
+	if (ebs_volume != nil) {
+		return fmt.Errorf("Creating device %v failed: Volume already exists",
+			name)
+	}
+
 	size, _ := strconv.ParseInt(options["size"], 10, 64)
 	volume, err := d.ec2.CreateVolume(&ec2.CreateVolumeInput{
 		AvailabilityZone: aws.String(d.awsAvailabilityZone),
@@ -212,6 +219,9 @@ func (d *ebsVolumeDriver) getEBSVolume(name string) (*ec2.Volume, error) {
 	}
 	if len(volumes.Volumes) == 0 {
 		return nil, errors.New("Volume not found")
+	}
+	if len(volumes.Volumes) > 1 {
+		return nil, errors.New("More then one volume with the same name")
 	}
 	return volumes.Volumes[0], nil
 }
